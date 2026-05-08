@@ -126,12 +126,9 @@ def _build_preprocessor(feature_frame: pd.DataFrame) -> ColumnTransformer:
 
 def load_data(split: str, partition_id: int, num_partitions: int):
     dataset, target_column = _load_split_dataframe(split)
-    # For training, partition by group/rows; for validation use the full test set
-    if split == "train":
-        dataset = _partition_rows(dataset, partition_id, num_partitions)
-    else:
-        # Keep full validation set (val.pkl) as the global test set
-        dataset = dataset.copy()
+    # Partition train and validation by the same CRF01 grouping so each client
+    # sees its own local train/val split.
+    dataset = _partition_rows(dataset, partition_id, num_partitions)
 
     feature_frame = dataset.drop(columns=[target_column], errors="ignore")
     feature_frame = feature_frame.drop(columns=list(IGNORED_COLUMNS), errors="ignore")
@@ -198,13 +195,24 @@ def evaluator(model, test_loader):
     model.eval()
     absolute_error = 0.0
     squared_error = 0.0
+    target_sum = 0.0
+    target_squared_sum = 0.0
     total = 0
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
             outputs = model(X_batch)
-            absolute_error += torch.sum(torch.abs(outputs - y_batch)).item()
-            squared_error += torch.sum((outputs - y_batch) ** 2).item()
+            batch_error = outputs - y_batch
+            absolute_error += torch.sum(torch.abs(batch_error)).item()
+            squared_error += torch.sum(batch_error ** 2).item()
+            target_sum += torch.sum(y_batch).item()
+            target_squared_sum += torch.sum(y_batch ** 2).item()
             total += y_batch.size(0)
     mae = absolute_error / total
-    rmse = math.sqrt(squared_error / total)
-    return mae, rmse
+    mse = squared_error / total
+    rmse = math.sqrt(mse)
+    if total > 1:
+        total_variance = target_squared_sum - (target_sum ** 2) / total
+        r2 = 1.0 - (squared_error / total_variance) if total_variance > 0 else 0.0
+    else:
+        r2 = 0.0
+    return mae, mse, rmse, r2

@@ -26,14 +26,16 @@ def train(msg: Message, context: Context):
 
     # Perform training
     trainer(net, train_loader)
-    train_mae, train_rmse = evaluator(net, train_loader)
+    train_mae, train_mse, train_rmse, train_r2 = evaluator(net, train_loader)
 
     # Construct and return reply Message
     model_record = ArrayRecord(net.state_dict())
     metrics = {
         "num-examples": len(train_loader.dataset),
         "train-mae": train_mae,
+        "train-mse": train_mse,
         "train-rmse": train_rmse,
+        "train-r2": train_r2,
     }
     metric_record = MetricRecord(metrics)
     content = RecordDict({"arrays": model_record, "metrics": metric_record})
@@ -56,13 +58,14 @@ def evaluate(msg: Message, context: Context):
     net.load_state_dict(msg.content["arrays"].to_torch_state_dict())
 
     # Perform evaluation
-    mae, rmse = evaluator(net, test_loader)
+    mae, mse, rmse, r2 = evaluator(net, test_loader)
 
     # Construct and return reply Message
     metrics = {
-        "loss": mae,
         "mae": mae,
+        "mse": mse,
         "rmse": rmse,
+        "r2": r2,
         "num-examples": len(test_loader.dataset),
     }
     metric_record = MetricRecord(metrics)
