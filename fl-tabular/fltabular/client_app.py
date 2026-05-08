@@ -14,7 +14,8 @@ def train(msg: Message, context: Context):
     """Train the model on local data."""
     # Load dataset
     partition_id = context.node_config["partition-id"]
-    train_loader, _ = load_data(
+    train_loader = load_data(
+        "train",
         partition_id=partition_id, num_partitions=context.node_config["num-partitions"]
     )
 
@@ -24,13 +25,14 @@ def train(msg: Message, context: Context):
 
     # Perform training
     trainer(net, train_loader)
-    train_mae, _ = evaluator(net, train_loader)
+    train_mae, train_rmse = evaluator(net, train_loader)
 
     # Construct and return reply Message
     model_record = ArrayRecord(net.state_dict())
     metrics = {
         "num-examples": len(train_loader.dataset),
         "train-mae": train_mae,
+        "train-rmse": train_rmse,
     }
     metric_record = MetricRecord(metrics)
     content = RecordDict({"arrays": model_record, "metrics": metric_record})
@@ -42,7 +44,8 @@ def evaluate(msg: Message, context: Context):
     """Evaluate the model on local data."""
     # Load dataset
     partition_id = context.node_config["partition-id"]
-    _, test_loader = load_data(
+    test_loader = load_data(
+        "val",
         partition_id=partition_id, num_partitions=context.node_config["num-partitions"]
     )
 
@@ -51,12 +54,13 @@ def evaluate(msg: Message, context: Context):
     net.load_state_dict(msg.content["arrays"].to_torch_state_dict())
 
     # Perform evaluation
-    loss, mae = evaluator(net, test_loader)
+    mae, rmse = evaluator(net, test_loader)
 
     # Construct and return reply Message
     metrics = {
-        "loss": loss,
+        "loss": mae,
         "mae": mae,
+        "rmse": rmse,
         "num-examples": len(test_loader.dataset),
     }
     metric_record = MetricRecord(metrics)

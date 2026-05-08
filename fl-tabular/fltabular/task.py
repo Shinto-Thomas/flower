@@ -1,29 +1,38 @@
 """fltabular: Flower Example on Adult Census Income Tabular Dataset."""
 
 import os
+import math
 from pathlib import Path
 
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 from sklearn.compose import ColumnTransformer
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 
-DATA_PATH_ENV = "FL_TABULAR_DATA_PATH"
+TRAIN_DATA_PATH_ENV = "FL_TABULAR_TRAIN_DATA_PATH"
+VAL_DATA_PATH_ENV = "FL_TABULAR_VAL_DATA_PATH"
 TARGET_COLUMN_ENV = "FL_TABULAR_TARGET_COLUMN"
-PARTITION_COLUMN = "CRF01"
 DEFAULT_TARGET_COLUMN = "COST_BL"
-_partition_info_logged = False
+IGNORED_COLUMNS = {"CRF01"}
+_preprocessors: dict[int, ColumnTransformer] = {}
 
 
-def _get_dataset_path() -> Path:
-    env_path = os.environ.get(DATA_PATH_ENV)
+def _get_dataset_path(split: str) -> Path:
+    env_name = TRAIN_DATA_PATH_ENV if split == "train" else VAL_DATA_PATH_ENV
+    default_name = "train_db.pkl" if split == "train" else "val_db.pkl"
+
+    env_path = os.environ.get(env_name)
     if env_path:
         return Path(env_path).expanduser().resolve()
+
+    default_path = Path.cwd() / default_name
+    if default_path.exists():
+        return default_path.resolve()
 
     candidates = sorted(Path.cwd().glob("*.pkl"))
     if len(candidates) == 1:
@@ -31,11 +40,11 @@ def _get_dataset_path() -> Path:
 
     if not candidates:
         raise FileNotFoundError(
-            f"No .pkl file found in {Path.cwd()}. Set {DATA_PATH_ENV} to the file path."
+            f"No .pkl file found in {Path.cwd()}. Set {env_name} or place {default_name} next to the app."
         )
 
     raise RuntimeError(
-        f"Found multiple .pkl files in {Path.cwd()}. Set {DATA_PATH_ENV} to the file path."
+        f"Found multiple .pkl files in {Path.cwd()}. Set {env_name} to the file path."
     )
 
 
@@ -50,81 +59,86 @@ def _get_target_column(dataset: pd.DataFrame) -> str:
 
 
 def get_input_dim() -> int:
-    dataset = pd.read_pickle(_get_dataset_path())
+    dataset = pd.read_pickle(_get_dataset_path("train"))
     target_column = _get_target_column(dataset)
-    return len(dataset.columns.difference([PARTITION_COLUMN, target_column]))
+    feature_columns = [column for column in dataset.columns if column not in {target_column, *IGNORED_COLUMNS}]
+    return len(feature_columns)
 
 
-def load_data(partition_id: int, num_partitions: int):
-    global _partition_info_logged
-
-    dataset = pd.read_pickle(_get_dataset_path())
-
-    if PARTITION_COLUMN not in dataset.columns:
-        raise KeyError(f"Missing partition column '{PARTITION_COLUMN}'.")
-
-    target_column = _get_target_column(dataset)
-    partition_values = sorted(dataset[PARTITION_COLUMN].dropna().unique())
-    if not partition_values:
-        raise ValueError(f"No partition values found in '{PARTITION_COLUMN}'.")
-
-    if not _partition_info_logged:
-        print(
-            f"Detected {len(partition_values)} unique '{PARTITION_COLUMN}' IDs: {partition_values}"
-        )
-        if num_partitions != len(partition_values):
-            print(
-                f"Simulation has {num_partitions} nodes, but data has {len(partition_values)} "
-                f"'{PARTITION_COLUMN}' IDs. Partition mapping will cycle across IDs."
-            )
-        _partition_info_logged = True
-
-    partition_index = partition_id % len(partition_values)
-    partition_value = partition_values[partition_index]
-    dataset = dataset[dataset[PARTITION_COLUMN] == partition_value].copy()
-
+def _load_split_dataframe(split: str) -> tuple[pd.DataFrame, str]:
+    dataset = pd.read_pickle(_get_dataset_path(split))
     dataset.dropna(inplace=True)
-    dataset.drop(columns=[PARTITION_COLUMN], inplace=True)
+    target_column = _get_target_column(dataset)
+    return dataset, target_column
 
-    categorical_cols = dataset.select_dtypes(include=["object", "string", "category"]).columns.tolist()
-    if target_column in categorical_cols:
-        categorical_cols.remove(target_column)
-    ordinal_encoder = OrdinalEncoder()
-    dataset[categorical_cols] = ordinal_encoder.fit_transform(dataset[categorical_cols])
 
-    X = dataset.drop(target_column, axis=1)
-    y = dataset[target_column]
+def _partition_rows(dataset: pd.DataFrame, partition_id: int, num_partitions: int) -> pd.DataFrame:
+    if num_partitions < 1:
+        raise ValueError("num_partitions must be at least 1")
 
-    if PARTITION_COLUMN in X.columns:
-        X = X.drop(columns=[PARTITION_COLUMN])
+    shuffled = dataset.sample(frac=1, random_state=42).reset_index(drop=True)
+    partition_indices = np.array_split(np.arange(len(shuffled)), num_partitions)
+    selected_indices = partition_indices[partition_id % len(partition_indices)]
+    return shuffled.iloc[selected_indices].copy()
 
-    y = pd.to_numeric(y, errors="coerce")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+def _build_preprocessor(feature_frame: pd.DataFrame) -> ColumnTransformer:
+    categorical_cols = feature_frame.select_dtypes(
+        include=["object", "string", "category"]
+    ).columns.tolist()
+    numeric_cols = feature_frame.select_dtypes(include=["number", "bool"]).columns.tolist()
 
-    numeric_features = X.select_dtypes(include=["number", "bool"]).columns.tolist()
-    numeric_transformer = Pipeline(steps=[("scaler", StandardScaler())])
+    transformers = []
+    if categorical_cols:
+        transformers.append(
+            (
+                "cat",
+                OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
+                categorical_cols,
+            )
+        )
+    if numeric_cols:
+        transformers.append(("num", StandardScaler(), numeric_cols))
 
-    preprocessor = ColumnTransformer(
-        transformers=[("num", numeric_transformer, numeric_features)]
-    )
+    return ColumnTransformer(transformers=transformers)
 
-    X_train = preprocessor.fit_transform(X_train)
-    X_test = preprocessor.transform(X_test)
 
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).view(-1, 1)
-    y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).view(-1, 1)
+def load_data(split: str, partition_id: int, num_partitions: int):
+    dataset, target_column = _load_split_dataframe(split)
+    dataset = _partition_rows(dataset, partition_id, num_partitions)
 
-    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-    test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
+    feature_frame = dataset.drop(columns=[target_column], errors="ignore")
+    feature_frame = feature_frame.drop(columns=list(IGNORED_COLUMNS), errors="ignore")
+    y = pd.to_numeric(dataset[target_column], errors="coerce")
+    valid_rows = y.notna()
+    feature_frame = feature_frame.loc[valid_rows].reset_index(drop=True)
+    y = y.loc[valid_rows].reset_index(drop=True)
 
-    return train_loader, test_loader
+    cache_key = partition_id
+    if split == "train":
+        preprocessor = _build_preprocessor(feature_frame)
+        X = preprocessor.fit_transform(feature_frame)
+        _preprocessors[cache_key] = preprocessor
+    else:
+        preprocessor = _preprocessors.get(cache_key)
+        if preprocessor is None:
+            train_dataset, train_target = _load_split_dataframe("train")
+            train_dataset = _partition_rows(train_dataset, partition_id, num_partitions)
+            train_features = train_dataset.drop(columns=[train_target], errors="ignore")
+            train_features = train_features.drop(columns=list(IGNORED_COLUMNS), errors="ignore")
+            train_y = pd.to_numeric(train_dataset[train_target], errors="coerce")
+            train_valid_rows = train_y.notna()
+            train_features = train_features.loc[train_valid_rows].reset_index(drop=True)
+            preprocessor = _build_preprocessor(train_features)
+            preprocessor.fit(train_features)
+            _preprocessors[cache_key] = preprocessor
+        X = preprocessor.transform(feature_frame)
+
+    X_tensor = torch.tensor(X, dtype=torch.float32)
+    y_tensor = torch.tensor(y.values, dtype=torch.float32).view(-1, 1)
+
+    dataset_tensor = TensorDataset(X_tensor, y_tensor)
+    return DataLoader(dataset_tensor, batch_size=8, shuffle=(split == "train"))
 
 
 class CostRegressor(nn.Module):
@@ -143,7 +157,7 @@ class CostRegressor(nn.Module):
 
 def trainer(model, train_loader, num_epochs=10):
     criterion = nn.L1Loss()
-    optimizer = optim.Adam(model.parameters(), lr=0.5)
+    optimizer = optim.Adam(model.parameters(), lr=1)
     model.train()
     for epoch in range(num_epochs):
         for X_batch, y_batch in train_loader:
@@ -156,14 +170,15 @@ def trainer(model, train_loader, num_epochs=10):
 
 def evaluator(model, test_loader):
     model.eval()
-    criterion = nn.L1Loss()
-    loss = 0.0
+    absolute_error = 0.0
+    squared_error = 0.0
     total = 0
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
             outputs = model(X_batch)
-            batch_loss = criterion(outputs, y_batch)
-            loss += batch_loss.item()
+            absolute_error += torch.sum(torch.abs(outputs - y_batch)).item()
+            squared_error += torch.sum((outputs - y_batch) ** 2).item()
             total += y_batch.size(0)
-    mae = loss / len(test_loader)
-    return mae, mae
+    mae = absolute_error / total
+    rmse = math.sqrt(squared_error / total)
+    return mae, rmse
