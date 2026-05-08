@@ -75,7 +75,28 @@ def _load_split_dataframe(split: str) -> tuple[pd.DataFrame, str]:
 def _partition_rows(dataset: pd.DataFrame, partition_id: int, num_partitions: int) -> pd.DataFrame:
     if num_partitions < 1:
         raise ValueError("num_partitions must be at least 1")
+    # If the dataset contains a CRF01 column, partition by that group variable
+    group_col = "CRF01"
+    if group_col in dataset.columns:
+        unique_groups = np.array(sorted(dataset[group_col].dropna().unique()))
+        if len(unique_groups) == 0:
+            # No groups available, fall back to row-splitting
+            shuffled = dataset.sample(frac=1, random_state=42).reset_index(drop=True)
+            partition_indices = np.array_split(np.arange(len(shuffled)), num_partitions)
+            selected_indices = partition_indices[partition_id % len(partition_indices)]
+            return shuffled.iloc[selected_indices].copy()
 
+        # Split group values across partitions (even if num_partitions != number of groups)
+        group_chunks = np.array_split(unique_groups, num_partitions)
+        groups_for_partition = list(group_chunks[partition_id % len(group_chunks)])
+        if not groups_for_partition:
+            # No groups assigned to this partition -> empty dataframe with same columns
+            return dataset.iloc[0:0].copy()
+        selected = dataset[dataset[group_col].isin(groups_for_partition)].copy()
+        # Keep deterministic order
+        return selected.reset_index(drop=True)
+
+    # Fallback: even row-splitting when no group column present
     shuffled = dataset.sample(frac=1, random_state=42).reset_index(drop=True)
     partition_indices = np.array_split(np.arange(len(shuffled)), num_partitions)
     selected_indices = partition_indices[partition_id % len(partition_indices)]
@@ -105,7 +126,12 @@ def _build_preprocessor(feature_frame: pd.DataFrame) -> ColumnTransformer:
 
 def load_data(split: str, partition_id: int, num_partitions: int):
     dataset, target_column = _load_split_dataframe(split)
-    dataset = _partition_rows(dataset, partition_id, num_partitions)
+    # For training, partition by group/rows; for validation use the full test set
+    if split == "train":
+        dataset = _partition_rows(dataset, partition_id, num_partitions)
+    else:
+        # Keep full validation set (val.pkl) as the global test set
+        dataset = dataset.copy()
 
     feature_frame = dataset.drop(columns=[target_column], errors="ignore")
     feature_frame = feature_frame.drop(columns=list(IGNORED_COLUMNS), errors="ignore")

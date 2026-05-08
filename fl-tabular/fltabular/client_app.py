@@ -18,6 +18,7 @@ def train(msg: Message, context: Context):
         "train",
         partition_id=partition_id, num_partitions=context.node_config["num-partitions"]
     )
+    print(f"Client {partition_id} train samples: {len(train_loader.dataset)}")
 
     # Load model
     net = CostRegressor(get_input_dim())
@@ -48,6 +49,7 @@ def evaluate(msg: Message, context: Context):
         "val",
         partition_id=partition_id, num_partitions=context.node_config["num-partitions"]
     )
+    print(f"Client {partition_id} val samples (global test set): {len(test_loader.dataset)}")
 
     # Load model
     net = CostRegressor(get_input_dim())
