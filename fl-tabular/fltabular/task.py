@@ -86,9 +86,11 @@ def _partition_rows(dataset: pd.DataFrame, partition_id: int, num_partitions: in
             selected_indices = partition_indices[partition_id % len(partition_indices)]
             return shuffled.iloc[selected_indices].copy()
 
-        # Split group values across partitions (even if num_partitions != number of groups)
-        group_chunks = np.array_split(unique_groups, num_partitions)
-        groups_for_partition = list(group_chunks[partition_id % len(group_chunks)])
+        # Use as many partitions as there are unique groups so each client gets a
+        # CRF01-based slice even when the runtime launches more nodes than groups.
+        effective_partitions = min(num_partitions, len(unique_groups))
+        group_chunks = np.array_split(unique_groups, effective_partitions)
+        groups_for_partition = list(group_chunks[partition_id % effective_partitions])
         if not groups_for_partition:
             # No groups assigned to this partition -> empty dataframe with same columns
             return dataset.iloc[0:0].copy()
@@ -137,6 +139,12 @@ def load_data(split: str, partition_id: int, num_partitions: int):
     feature_frame = feature_frame.loc[valid_rows].reset_index(drop=True)
     y = y.loc[valid_rows].reset_index(drop=True)
 
+    if feature_frame.empty:
+        raise ValueError(
+            f"Partition {partition_id} has no usable rows after CRF01 grouping and target filtering. "
+            "Make sure the simulation has at least one group with valid target values."
+        )
+
     cache_key = partition_id
     if split == "train":
         preprocessor = _build_preprocessor(feature_frame)
@@ -178,7 +186,7 @@ class CostRegressor(nn.Module):
         return self.layer1(x)
 
 
-def trainer(model, train_loader, num_epochs=10):
+def trainer(model, train_loader, num_epochs=30):
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=1)
     model.train()
