@@ -11,7 +11,7 @@ import torch.optim as optim
 import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OrdinalEncoder, StandardScaler
+from sklearn.preprocessing import OrdinalEncoder
 from torch.utils.data import DataLoader, TensorDataset
 
 TRAIN_DATA_PATH_ENV = "FL_TABULAR_TRAIN_DATA_PATH"
@@ -121,7 +121,9 @@ def _build_preprocessor(feature_frame: pd.DataFrame) -> ColumnTransformer:
             )
         )
     if numeric_cols:
-        transformers.append(("num", StandardScaler(), numeric_cols))
+        # Keep numeric columns raw (no standardization) per user's request.
+        # Use 'passthrough' so numeric values are preserved as-is.
+        transformers.append(("num", "passthrough", numeric_cols))
 
     return ColumnTransformer(transformers=transformers)
 
@@ -186,7 +188,7 @@ class CostRegressor(nn.Module):
         return self.layer1(x)
 
 
-def trainer(model, train_loader, num_epochs=30):
+def trainer(model, train_loader, num_epochs=10):
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=1)
     model.train()

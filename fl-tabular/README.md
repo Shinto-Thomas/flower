@@ -59,13 +59,9 @@ fewer components to be launched manually. By default, `flwr run` will make use o
 > [!NOTE]
 > Check the [Simulation Engine documentation](https://flower.ai/docs/framework/how-to-run-simulations.html) to learn more about Flower simulations and how to optimize them.
 
-This example is designed to run with 7 virtual `SuperNodes`. First we need to change the configuration of the Simulation Runtime (which by default uses 10 nodes). This guide assumes your default `SuperLink` connection points to one ready for simulations. If you aren't sure, please refer to the [How-to run Flower locally](https://flower.ai/docs/framework/how-to-run-flower-locally.html) guide.
+This example partitions clients by the unique values in the `CRF01` column. You do not need to match the simulation runtime to a fixed number of groups, but you should make sure your dataset contains valid `CRF01` values and that each partition has at least one usable row.
 
-Place your `train_db.pkl` and `val_db.pkl` files in the `fl-tabular` directory, or set `FL_TABULAR_TRAIN_DATA_PATH` and `FL_TABULAR_VAL_DATA_PATH` to their locations. The `CRF01` column is ignored by the model and only kept out of the analysis.
-
-```bash
-flwr federation simulation-config --num-supernodes=7
-```
+Place your `train_db.pkl` and `val_db.pkl` files in the `fl-tabular` directory, or set `FL_TABULAR_TRAIN_DATA_PATH` and `FL_TABULAR_VAL_DATA_PATH` to their locations. The `CRF01` column is used to define client groups and is ignored by the model itself.
 
 Finally, let's run the app:
 

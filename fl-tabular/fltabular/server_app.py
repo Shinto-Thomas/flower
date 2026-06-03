@@ -1,5 +1,7 @@
 """fltabular: Flower Example on Adult Census Income Tabular Dataset."""
 
+from time import perf_counter
+
 import torch
 from flwr.app import ArrayRecord, Context
 from flwr.serverapp import Grid, ServerApp
@@ -42,11 +44,14 @@ def main(grid: Grid, context: Context) -> None:
     strategy = FedAvg()
 
     # Start strategy, run FedAvg for `num_rounds`
+    start_time = perf_counter()
     result = strategy.start(
         grid=grid,
         initial_arrays=arrays,
         num_rounds=num_rounds,
     )
+    elapsed_seconds = perf_counter() - start_time
+    print(f"Federated run time: {elapsed_seconds:.2f} seconds")
 
     # Save final model to disk
     print("\nSaving final model to disk...")
