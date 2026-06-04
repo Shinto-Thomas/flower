@@ -27,5 +27,5 @@ serverapp = "fltabular.server_app:app"
 clientapp = "fltabular.client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 5
+num-server-rounds = 25
 
