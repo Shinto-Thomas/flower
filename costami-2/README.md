@@ -10,6 +10,14 @@ This code exemplifies a federated learning setup using the Flower framework on t
 
 This example uses [Flower Datasets](https://flower.ai/docs/datasets/) to download, partition and preprocess the dataset.
 
+If you want to use a local CSV or Parquet dataset instead, add a `data-path` to the
+node config and set `partition-by` to the column that identifies the group for each
+row. The example client will partition the local file with `NaturalIdPartitioner`,
+so each unique value in that column becomes one partition.
+
+If you need multiple group ids per client, switch the partitioner in
+`fltabular/task.py` to `GroupedNaturalIdPartitioner`.
+
 ## Set up the project
 
 ### Fetch the app

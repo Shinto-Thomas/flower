@@ -5,7 +5,7 @@ from flwr.app import ArrayRecord, Context
 from flwr.serverapp import Grid, ServerApp
 from flwr.serverapp.strategy import FedAvg
 
-from fltabular.task import IncomeClassifier
+from fltabular.task import CostRegressor
 
 # Create ServerApp
 app = ServerApp()
@@ -19,7 +19,7 @@ def main(grid: Grid, context: Context) -> None:
     num_rounds: int = context.run_config["num-server-rounds"]
 
     # Init global model
-    net = IncomeClassifier()
+    net = CostRegressor()
     arrays = ArrayRecord(net.state_dict())
 
     # Initialize FedAvg strategy

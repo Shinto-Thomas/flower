@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fl-tabular"
+version = "1.1.1"
+description = "Adult Census Income Tabular Dataset and Federated Learning in Flower"
+license = { file = "LICENSE" }
+dependencies = [
+    "flwr[simulation]>=1.28.0",
+    "flwr-datasets>=0.6.0",
+    "torch==2.8.0",
+    "scikit-learn==1.7.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "flwrlabs"
+fab-format-version = 1
+flwr-version-target = "1.29.0"
+
+[tool.flwr.app.components]
+serverapp = "fltabular.server_app:app"
+clientapp = "fltabular.client_app:app"
+
+[tool.flwr.app.config]
+num-server-rounds = 25
+fraction-train = 1.0
+fraction-evaluate = 1.0
+learning-rate = 0.001
+local-epochs = 10
+batch-size = 8
+dataset-path = "/workspaces/flower/costami-2/db.csv"   # your CSV
+group-col = "CRF01"            # your grouping variable
+target-col = "COST_BL"                   # your outcome
+num-features = 13                     # 15 total - group_col - target_col
+noise-multiplier = 0.5
+clipping-norm = 1.0
+num-sampled-clients = 7               # = fraction-train * num-supernodes
+save-model = true
+
+[superlink]
+default = "local-simulation"
+
+[superlink.supergrid]
+address = "supergrid.flower.ai"
+
+[superlink.local]
+address = ":local:"
+
+[superlink.local-simulation]
+address = ":local:"
+options.num-supernodes = 7
+#######################################################################
+# CONFIGURATION MIGRATION NOTICE:
+#
+# What was previously called "federation config" for SuperLink
+# connections in pyproject.toml has been renamed and moved.
+#
+# These settings are now **SuperLink connection configuration**
+# and are defined in the Flower configuration file.
+#
+# The entries below are commented out intentionally and are kept
+# only as a migration reference.
+#
+# Docs: https://flower.ai/docs/framework/ref-flower-configuration.html
+#######################################################################
+
+# [tool.flwr.federations]
+# default = "local-simulation"
+
+# [tool.flwr.federations.local-simulation]
+# options.num-supernodes = 5

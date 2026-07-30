@@ -18,7 +18,7 @@
   "containerEnv": {
     "POETRY_VIRTUALENVS_CREATE": "false"
   },
-  "mounts": [
-    "source=flwr-bashhistory,target=/commandhistory,type=volume"
-  ]
+"mounts": [
+  "source=flwr-bashhistory,target=/commandhistory,type=volume"
+]
 }

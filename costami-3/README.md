@@ -68,7 +68,7 @@ flwr federation simulation-config --num-supernodes=5
 Finally, let's run the app:
 
 ```bash
-flwr run .  --stream
+flwr run . --stream --federation-config="num-supernodes=7" --run-config="num-server-rounds=100"
 ```
 
 You can also override some of the settings for your `ClientApp` and `ServerApp` defined in `pyproject.toml`. For example:
